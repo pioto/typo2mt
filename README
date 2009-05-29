@@ -1,0 +1,18 @@
+typo2mt - takes a typo database and converts it to a Movable Type import file
+
+This script is for exporting a typo[1] blog database to the Movable Type import
+format[2].
+
+The standard usage is something like:
+
+  typo2mt --dsn DBI:mysql:typo:localhost --user typo --password typ0_pasS > typo_export
+
+This will export your blog to the typo_export file, which you can then
+import[3] into Movable Type.
+
+This script worked for me last year, but patches are welcome.
+
+  [1] http://wiki.github.com/fdv/typo/
+  [2] http://www.sixapart.com/movabletype/docs/mtimport
+  [3] http://www.movabletype.org/documentation/administrator/maintenance/import-export.html
+

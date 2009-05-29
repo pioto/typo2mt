@@ -1,0 +1,10 @@
+.*.swp
+Build
+_build
+blib
+META.yml
+MANIFEST
+typo2mt-*.tar*
+typo2mt-*.*/
+*.bak
+cover_db/

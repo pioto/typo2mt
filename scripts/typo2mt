@@ -1,0 +1,140 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+=head1 NAME
+
+typo2mt - takes a typo database and converts it to a Movable Type import file
+
+=head1 SYNOPSIS
+
+  typo2mt --dsn DBI:mysql:db_name:db_host --user db_user --password db_password
+
+  Options:
+  
+    --dsn DSN       The DBI DSN that describes your database.
+    --user USER     The username to use to connect to the database.
+    --password PASS The password to use to connect to the database.
+
+=head1 DESCRIPTION
+
+Given the correct database connection info, this script will send an
+appropriate Movable Type import file to STDOUT.
+
+=head1 SEE ALSO
+
+The Movable Type Import Format:
+
+    L<http://www.sixapart.com/movabletype/docs/mtimport>
+
+=cut
+
+our $VERSION = '0.02';
+$VERSION = eval $VERSION;
+
+use DBI;
+use Getopt::Long qw(:config auto_help auto_version);
+use Pod::Usage;
+
+my %O;
+GetOptions(\%O, 'dsn=s', 'user=s', 'password=s')
+    or pod2usage(2);
+
+my $missing_args;
+foreach (qw(dsn user password)) {
+    unless ($O{$_}) {
+        print STDERR "Missing required option $_\n";
+        $missing_args++;
+    }
+}
+pod2usage(2) if $missing_args or @ARGV;
+
+my $dbh = DBI->connect($O{dsn}, $O{user}, $O{password},
+    { RaiseError => 1, AutoCommit => 0 });
+
+my $contents_sth = $dbh->prepare(qq{
+	select type, id, title, author, published_at, body
+	  from contents
+	});
+my $article_tags_sth = $dbh->prepare(qq{
+	select tag_id
+	  from articles_tags
+	  where article_id = ?
+	});
+my $tags_sth = $dbh->prepare(qq{
+	select name
+	  from tags
+	  where id = ?
+	});
+my $comments_sth = $dbh->prepare(qq{
+	select author, email, url, ip, created_at, body
+	  from feedback
+	  where ( state = "ham"
+	    or state = "presumed_ham" )
+	    and article_id = ?
+          order by created_at
+	});
+$contents_sth->execute();
+
+my %entry;
+
+while ((my $type, my $article_id, $entry{TITLE}, $entry{AUTHOR}, $entry{DATE}, $entry{BODY}) = $contents_sth->fetchrow_array()) {
+	next if ($type eq 'Page');
+	$entry{DATE} =~ s#(\d\d\d\d)-(\d\d)-(\d\d) (\d\d:\d\d:\d\d)#$2/$3/$1 $4#;
+	$article_tags_sth->execute($article_id);
+	my @tag_ids;
+	while (my ($t) = $article_tags_sth->fetchrow_array()) {
+		$tags_sth->execute($t);
+		my ($tn) = $tags_sth->fetchrow_array();
+		push @tag_ids, $tn;
+	}
+	$entry{CATEGORY} = \@tag_ids;
+	#print "Found '$entry{TITLE}' by $entry{AUTHOR} on $entry{DATE}\n";
+	#print "  marked ( @tag_ids ) (#$article_id)\n";
+
+	# output the main article stuff
+	print "TITLE: $entry{TITLE}\n";
+	print "AUTHOR: $entry{AUTHOR}\n";
+	print "DATE: $entry{DATE}\n";
+	print "CATEGORY: $_\n" for (@{$entry{CATEGORY}});
+	print "STATUS: publish\n";
+	print "ALLOW COMMENTS: 1\n";
+	print "ALLOW PINGS: 1\n";
+	#print "CONVERT BREAKS: 1\n";
+
+	print "-----\n";
+
+	print "BODY:\n";
+	print "$entry{BODY}\n";
+	print "-----\n";
+
+	# now, lookup the comments
+	my %comment;
+	$comments_sth->execute($article_id);
+	while (($comment{AUTHOR}, $comment{EMAIL}, $comment{URL}, 
+			$comment{IP}, $comment{DATE}, $comment{BODY})
+			= $comments_sth->fetchrow_array()) {
+		$comment{DATE} =~ s#(\d\d\d\d)-(\d\d)-(\d\d) (\d\d:\d\d:\d\d)#$2/$3/$1 $4#; 
+		print "COMMENT:\n";
+		print "AUTHOR: $comment{AUTHOR}\n";
+		print "DATE: $comment{DATE}\n";
+		print "IP: $comment{IP}\n";
+		print "EMAIL: $comment{EMAIL}\n";
+		print "URL: $comment{URL}\n";
+		print "$comment{BODY}\n";
+		print "-----\n";
+		%comment = ();
+	}
+
+
+	# end of one article
+	print "--------\n";
+}
+
+$contents_sth->finish();
+$article_tags_sth->finish();
+$tags_sth->finish();
+$comments_sth->finish();
+
+$dbh->disconnect();
+
